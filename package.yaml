@@ -1,0 +1,50 @@
+name:                basem-playground
+version:             0.1.0.0
+github:              "VlachJosef/basem-playground"
+license:             BSD3
+author:              "Josef Vlach"
+maintainer:          "vlach.josef@gmail.com"
+copyright:           "2018 Josef Vlach"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Development
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/VlachJosef/basem-playground#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- transformers
+- mtl
+
+library:
+  source-dirs: src
+
+executables:
+  basem-playground-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - basem-playground
+
+tests:
+  basem-playground-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - basem-playground

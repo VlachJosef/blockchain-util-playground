@@ -1,0 +1,68 @@
+cabal-version: >= 1.10
+
+-- This file has been generated from package.yaml by hpack version 0.29.6.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 836d15cebc103f8d69c9d3c73c4492f162fcbbf2b29e8f1791d654e9f375a053
+
+name:           basem-playground
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/VlachJosef/basem-playground#readme>
+homepage:       https://github.com/VlachJosef/basem-playground#readme
+bug-reports:    https://github.com/VlachJosef/basem-playground/issues
+author:         Josef Vlach
+maintainer:     vlach.josef@gmail.com
+copyright:      2018 Josef Vlach
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    ChangeLog.md
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/VlachJosef/basem-playground
+
+library
+  exposed-modules:
+      Lib
+  other-modules:
+      Paths_basem_playground
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , mtl
+    , transformers
+  default-language: Haskell2010
+
+executable basem-playground-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_basem_playground
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , basem-playground
+    , mtl
+    , transformers
+  default-language: Haskell2010
+
+test-suite basem-playground-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_basem_playground
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , basem-playground
+    , mtl
+    , transformers
+  default-language: Haskell2010
