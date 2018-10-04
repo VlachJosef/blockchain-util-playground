@@ -21,8 +21,9 @@ description:         Please see the README on GitHub at <https://github.com/Vlac
 
 dependencies:
 - base >= 4.7 && < 5
-- transformers
+- microlens
 - mtl
+- transformers
 
 library:
   source-dirs: src

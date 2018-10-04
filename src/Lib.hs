@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE Rank2Types                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
@@ -14,10 +15,18 @@
 
 module Lib where
 
-import           Control.Monad        (join)
-import           Control.Monad.Reader (ReaderT (..))
-import           Data.Char            (chr)
-import           Data.Functor         (Functor)
+import           Control.Monad.State.Class      (MonadState, gets, modify)
+import           Control.Monad.Trans.State.Lazy (StateT, runStateT)
+
+import           Control.Monad                  (join)
+import           Control.Monad.Reader           (ReaderT (..), ask, asks, local)
+import           Control.Monad.Reader.Class     (MonadReader)
+import           Control.Monad.Trans.Class      (lift)
+import           Data.Char                      (chr)
+import           Data.Foldable                  (foldMap)
+import           Data.Function                  ((&))
+import           Data.Functor                   (Functor)
+import           Lens.Micro                     (Lens, lens, (.~))
 
 newtype Id = Id Int deriving Show
 newtype Value = Value Char deriving Show
@@ -74,6 +83,7 @@ class Monad m => Effectful eff m where
     effect :: eff a -> m a
 
 type BaseMConstraint eff ctx m = ( Effectful eff m
+                                 , MonadReader ctx m
                                  )
 
 newtype BaseM eff ctx a = BaseM { unBaseM :: forall m . BaseMConstraint eff ctx m => m a }
@@ -98,6 +108,7 @@ newtype BaseMIO (eff :: * -> *) ctx a = BaseMIO
 
 deriving instance Applicative (BaseMIO eff ctx)
 deriving instance Monad (BaseMIO eff ctx)
+deriving instance MonadReader ctx (BaseMIO eff ctx)
 
 runBaseMIO
     :: forall eff ctx a .
@@ -119,6 +130,15 @@ class HasGetter s a where
     {-# MINIMAL  gett #-}
     gett :: HasGetter s a => s -> a
 
+class HasGetter s a => HasLens s a where
+    {-# MINIMAL lensFor | sett #-}
+
+    sett :: HasLens s a => s -> a -> s
+    sett s b = s & (lensFor @s @a) .~ b
+
+    lensFor :: HasLens s a => Lens s s a a
+    lensFor = lens gett (sett @s @a)
+
 instance HasGetter (IOCtx daa) (BaseMIOExec daa (IOCtx daa)) where
     gett = _ctxExec
 
@@ -126,7 +146,7 @@ type family ChgAccum ctx :: *
 type instance ChgAccum (IOCtx (DbAccessM chgAccum id value)) = chgAccum
 
 -- | Auxiliary datatype for context-dependant computations.
-data ChgAccumCtx ctx = CAInitialized (ChgAccum ctx)
+data ChgAccumCtx ctx = CAInitialized (ChgAccum ctx) | CANotInitialized
 
 runERoCompIO :: forall da daa a .
     ( DbActions da daa (ChgAccum (IOCtx da)) IO
@@ -142,6 +162,72 @@ runERoCompIO daa initChgAccum comp = runBaseMIO comp ctx
       { _ctxChgAccum = CAInitialized initChgAccum
       , _ctxExec     = BaseMIOExec $ \(getCAOrDefault . _ctxChgAccum -> chgAccum) da -> executeEffect da daa chgAccum
       }
+
+runERwCompIO
+  :: forall da daa s ctx a .
+    ( DbActions da daa (ChgAccum (IOCtx da)) IO
+    )
+    => daa IO
+    -> s
+    -> ERwComp da (IOCtx da) s a
+    -> IO (a, s)
+runERwCompIO daa initS comp = runBaseMIO (runERwComp comp initS) $
+        IOCtx
+          { _ctxChgAccum = CANotInitialized
+          , _ctxExec = BaseMIOExec $ \(getCAOrDefault . _ctxChgAccum -> chgAccum) da -> executeEffect da daa chgAccum
+          }
+
+-- | StateT over ERoComp.
+-- ERoComp can be lifted to ERwComp with regarding a current state.
+newtype ERwComp eff ctx s a = ERwComp { unERwComp :: StateT s (BaseM eff ctx) a }
+    deriving (Functor, Applicative, Monad, MonadState s)
+
+-- | Run a ERwComp with a passed initial state.
+runERwComp
+  :: forall eff ctx s a.
+    ( HasGetter ctx (ChgAccumCtx ctx)
+    )
+  => ERwComp eff ctx s a
+  -> s
+  -> BaseM eff ctx (a, s)
+runERwComp stComp initS = do
+    mChgAccum <- asks (gett @_ @(ChgAccumCtx ctx))
+    case mChgAccum of
+        CANotInitialized -> pure ()
+        CAInitialized _  -> error "throwLocalError ChgAccumCtxUnexpectedlyInitialized"
+    runStateT (unERwComp stComp) initS
+
+
+-- | Lift passed ERoComp to ERwComp.
+-- Set initial state of ERoComp as ChgAccum from state from ERwComp.
+liftERoComp
+    :: forall eff2 ctx s eff1 a.
+    ( HasLens ctx (ChgAccumCtx ctx)
+    , HasGetter s (ChgAccum ctx)
+    , ConvertEffect ctx eff1 eff2
+    )
+    => BaseM eff1 ctx a
+    -> ERwComp eff2 ctx s a
+liftERoComp comp =
+    gets (gett @_ @(ChgAccum ctx)) >>= ERwComp . lift . flip initAccumCtx (convertEffect comp)
+
+-- | Runs computation with specified initial Change Accumulator.
+initAccumCtx
+    :: forall eff ctx a .
+    ( HasLens ctx (ChgAccumCtx ctx)
+    )
+    => ChgAccum ctx
+    -> BaseM eff ctx a
+    -> BaseM eff ctx a
+initAccumCtx acc' comp = do
+    gett @_ @(ChgAccumCtx ctx) <$> ask >>= \case
+        CAInitialized _ -> error "ChgAccumCtxUnexpectedlyInitialized"
+        CANotInitialized ->
+            local (lensFor @ctx @(ChgAccumCtx ctx) .~ CAInitialized @ctx acc' ) comp
+
+instance MonadReader ctx (BaseM eff ctx) where
+    local f a = BaseM $ local (f :: ctx -> ctx) $ unBaseM a
+    ask = BaseM ask
 
 testDba :: DbAccessActions ChangeAccum Id Value IO
 testDba = DbAccessActions
@@ -177,21 +263,46 @@ dbQuery  = DbQuery (Id 42) (\chgAccum -> (Result [ChangeAccum [(Id 111, chgAccum
 
 getCAOrDefault :: ChgAccumCtx ctx -> ChgAccum ctx
 getCAOrDefault (CAInitialized cA) = cA
+getCAOrDefault CANotInitialized   = error "getCAOrDefault CANotInitialized"
 
-calculation :: [(Id, Value)] -> BaseM (DbAccessM ChangeAccum Id Value) ctx Result
+calculation :: [(Id, Value)] -> BaseM (DbAccessM ChangeAccum Id Value) (IOCtx (DbAccessM ChangeAccum Id Value)) Result
 calculation idVals = do
     (Result res1) <- convertEffect baseMQuery
     (Result res2) <- baseMModifyAccum idVals
     baseMModifyAccum $ ((incRes res2) ++ (join (unChangeAccum <$> res1)))
 
+calculationW :: ERwComp (DbAccessM ChangeAccum Id Value) (IOCtx (DbAccessM ChangeAccum Id Value)) ChangeAccum Result
+calculationW = do
+    chgSet :: Result <- liftERoComp baseMQuery
+    modify . flip sett $ chgSet
+    pure chgSet
+
+instance HasGetter ChangeAccum Result where
+    gett ca = Result [ca]
+
+instance HasLens ChangeAccum Result where
+    sett (ChangeAccum ca) (Result chgAccs) = ChangeAccum (foldMap unChangeAccum chgAccs ++ ca)
+
+instance HasLens (IOCtx daa) (ChgAccumCtx (IOCtx daa)) where
+    sett ctx val = ctx { _ctxChgAccum = val }
+
+instance HasGetter ChangeAccum ChangeAccum where
+  gett = id
+
+instance HasGetter (IOCtx daa) (ChgAccumCtx (IOCtx daa)) where
+  gett = _ctxChgAccum
+
 run :: IO Result
 run = runERoCompIO testDbaM (ChangeAccum $ [(Id 0, Value 'I')]) (calculation [(Id 1, Value 'A'), (Id 2, Value 'B'), (Id 3, Value 'C')])
+
+runw :: IO (Result, ChangeAccum)
+runw = runERwCompIO testDbaM (ChangeAccum $ [(Id 0, Value 'I')]) calculationW
 
 class ConvertEffect ctx eff1 eff2 where
     convertEffect :: BaseM eff1 ctx a -> BaseM eff2 ctx a
 
 newtype DbAccessT (eff1 :: * -> * -> * -> *) (eff2 :: * -> * -> * -> *) m a = DbAccessT { runDbAccessT :: m a }
-    deriving ( Functor, Applicative, Monad)
+    deriving (Functor, Applicative, Monad, MonadReader ctx)
 
 instance (Effectful (DbAccessM chgAccum id value) m)
     => Effectful (DbAccess id value)

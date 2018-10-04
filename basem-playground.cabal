@@ -4,7 +4,7 @@ cabal-version: >= 1.10
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 836d15cebc103f8d69c9d3c73c4492f162fcbbf2b29e8f1791d654e9f375a053
+-- hash: 95f7a2df61f2fe2ac876165dd78ba7f7c4184e84092432acec71862682dddb1d
 
 name:           basem-playground
 version:        0.1.0.0
@@ -34,6 +34,7 @@ library
       src
   build-depends:
       base >=4.7 && <5
+    , microlens
     , mtl
     , transformers
   default-language: Haskell2010
@@ -48,6 +49,7 @@ executable basem-playground-exe
   build-depends:
       base >=4.7 && <5
     , basem-playground
+    , microlens
     , mtl
     , transformers
   default-language: Haskell2010
@@ -63,6 +65,7 @@ test-suite basem-playground-test
   build-depends:
       base >=4.7 && <5
     , basem-playground
+    , microlens
     , mtl
     , transformers
   default-language: Haskell2010
